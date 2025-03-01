@@ -1,117 +1,142 @@
+const express = require('express');
 const ccxt = require('ccxt');
 const axios = require('axios');
 const moment = require('moment-timezone');
+const dotenv = require('dotenv');
+const { Telegraf } = require('telegraf');
 const prompt = require('./prompt');
-const dotenv = require('dotenv')
-const {Telegraf} = require('telegraf')
-dotenv.config()
+
+dotenv.config();
+
 // Configuration
 const telegramToken = process.env.BOT_TOKEN;
 const chatId = process.env.CHAT_ID;
 const bot = new Telegraf(telegramToken);
-const OPENROUTER_API_URL =  process.env.OPENROUTER_API_URL;
-const OPENROUTER_API_KEY =
-process.env.OPENROUTER_API_KEY; // Replace with your OpenRouter API key
-const SYMBOL = 'ICP/USDT'; // Trading pair
-const TIMEFRAME = '15m'; // Timeframe for data
-const AMOUNT = 1; // Amount to trade (e.g., 1 ICP)
+const OPENROUTER_API_URL = process.env.OPENROUTER_API_URL;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const SYMBOL = 'ICP/USDT';
+const TIMEFRAME = '15m';
+const AMOUNT = 1;
 
-// Initialize exchange (e.g., Binance)
 const exchange = new ccxt.binance();
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+let botRunning = false;
+let botInterval = null;
 
 // Fetch market data
 async function fetchMarketData(symbol, timeframe, limit = 600) {
   const ohlcv = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
-  const df = ohlcv.map(([timestamp, open, high, low, close, volume]) => ({
-    timestamp: moment.tz(timestamp, 'Asia/Bangkok').format(), // Convert to UTC+7
+  return ohlcv.map(([timestamp, open, high, low, close, volume]) => ({
+    timestamp: moment.tz(timestamp, 'Asia/Bangkok').format(),
     open,
     high,
     low,
     close,
     volume,
   }));
-  return df;
 }
 
-// Get AI trading signal from OpenRouter DeepSeek API
+// Get AI trading signal
 async function getAISignal(marketData) {
-  const headers = {
-    Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-    'Content-Type': 'application/json',
-  };
-  const payload = {
-    model: 'deepseek/deepseek-chat:free', // Specify the DeepSeek model
-    messages: [
-      {
-        role: 'system',
-        content: prompt,
-      },
-      {
-        role: 'user',
-        content: JSON.stringify(marketData),
-      },
-    ],
-  };
-
   try {
-    const response = await axios.post(OPENROUTER_API_URL, payload, { headers });
+    const response = await axios.post(
+      OPENROUTER_API_URL,
+      {
+        model: 'deepseek/deepseek-chat:free',
+        messages: [
+          { role: 'system', content: prompt },
+          { role: 'user', content: JSON.stringify(marketData) },
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
     return response.data.choices[0].message.content;
   } catch (error) {
-    console.error(
-      'Error fetching AI signal:',
-      error.response ? error.response.data : error.message
-    );
+    console.error('Error fetching AI signal:', error.response?.data || error.message);
     return null;
   }
 }
 
-// Execute trade based on AI signal
+// Execute trade
 async function executeTrade(signal, symbol, amount) {
   try {
     if (signal.toLowerCase().includes('buy')) {
-      // const order = await exchange.createMarketBuyOrder(symbol, amount);
-      await bot.telegram.sendMessage(chatId, signal);
-      console.log('Buy Order Executed:');
+      await bot.telegram.sendMessage(chatId, `BUY Signal: ${signal}`);
+      console.log('Buy Order Executed');
     } else if (signal.toLowerCase().includes('sell')) {
-    //   const order = await exchange.createMarketSellOrder(symbol, amount);
-      console.log('Sell Order Executed:');
-      await bot.telegram.sendMessage(chatId, signal);
+      await bot.telegram.sendMessage(chatId, `SELL Signal: ${signal}`);
+      console.log('Sell Order Executed');
     } else {
-      console.log('No action taken (hold).');
+      console.log('No trade action taken.');
     }
   } catch (error) {
     console.error('Error executing trade:', error);
   }
 }
 
-// Main loop
-async function main() {
-  while (true) {
+// Start trading bot
+function startBot() {
+  if (botRunning) {
+    console.log('Bot is already running.');
+    return;
+  }
+
+  botRunning = true;
+  botInterval = setInterval(async () => {
     try {
-      // Step 1: Fetch market data
       console.log('Fetching market data...');
       const marketData = await fetchMarketData(SYMBOL, TIMEFRAME);
-      console.log(marketData.slice(-5)); // Display last 5 rows
+      console.log(marketData.slice(-5));
 
-      // Step 2: Get AI trading signal
       console.log('Fetching AI signal...');
       const aiSignal = await getAISignal(marketData);
       console.log('AI Signal:', aiSignal);
 
-      // Step 3: Execute trade based on AI signal
       if (aiSignal) {
         await executeTrade(aiSignal, SYMBOL, AMOUNT);
       }
-
-      // Wait before the next iteration
-      console.log('Waiting for the next cycle...');
-      await new Promise((resolve) => setTimeout(resolve, 15 * 60 * 1000)); // Wait 15 minutes
     } catch (error) {
-      console.error('Error in main loop:', error);
-      await new Promise((resolve) => setTimeout(resolve, 60 * 1000)); // Wait 1 minute before retrying
+      console.error('Error in bot loop:', error);
     }
-  }
+  }, 1 * 60 * 1000); // Runs every 15 minutes
+
+  console.log('Trading bot started.');
 }
 
-// Run the bot
-main();
+// Stop trading bot
+function stopBot() {
+  if (!botRunning) {
+    console.log('Bot is not running.');
+    return;
+  }
+
+  clearInterval(botInterval);
+  botRunning = false;
+  console.log('Trading bot stopped.');
+}
+
+// Express Routes
+app.get('/', (req, res) => {
+  res.send('Crypto Trading Bot is running.');
+});
+
+app.get('/start', (req, res) => {
+  startBot();
+  res.send('Trading bot started.');
+});
+
+app.get('/stop', (req, res) => {
+  stopBot();
+  res.send('Trading bot stopped.');
+});
+
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
