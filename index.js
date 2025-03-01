@@ -105,7 +105,7 @@ function startBot() {
     } catch (error) {
       console.error('Error in bot loop:', error);
     }
-  }, 1 * 60 * 1000); // Runs every 15 minutes
+  }, 15 * 60 * 1000); // Runs every 15 minutes
 
   console.log('Trading bot started.');
 }
