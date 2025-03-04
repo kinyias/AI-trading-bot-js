@@ -26,7 +26,7 @@ let botRunning = false;
 let botInterval = null;
 
 // Fetch market data
-async function fetchMarketData(symbol, timeframe, limit = 600) {
+async function fetchMarketData(symbol, timeframe, limit = 800) {
   const ohlcv = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
   return ohlcv.map(([timestamp, open, high, low, close, volume]) => ({
     timestamp: moment.tz(timestamp, 'Asia/Bangkok').format(),
