@@ -24,6 +24,7 @@ const PORT = process.env.PORT || 3000;
 
 let botRunning = false;
 let botInterval = null;
+let conversationHistory = []; // Store conversation history
 
 // Fetch market data
 async function fetchMarketData(symbol, timeframe, limit = 800) {
@@ -39,16 +40,20 @@ async function fetchMarketData(symbol, timeframe, limit = 800) {
 }
 
 // Get AI trading signal
-async function getAISignal(marketData) {
+async function getAISignal(marketData, previousMessages = []) {
   try {
+    // Combine previous messages with the new market data
+    const messages = [
+      { role: 'system', content: prompt },
+      ...previousMessages, // Include previous messages
+      { role: 'user', content: JSON.stringify(marketData) }, // Add new market data
+    ];
+
     const response = await axios.post(
       OPENROUTER_API_URL,
       {
         model: 'deepseek/deepseek-chat:free',
-        messages: [
-          { role: 'system', content: prompt },
-          { role: 'user', content: JSON.stringify(marketData) },
-        ],
+        messages,
       },
       {
         headers: {
@@ -57,9 +62,18 @@ async function getAISignal(marketData) {
         },
       }
     );
-    return response.data.choices[0].message.content;
+
+    const aiSignal = response.data.choices[0].message.content;
+
+    // Add the AI's response to the messages array for future context
+    messages.push({ role: 'assistant', content: aiSignal });
+
+    return { aiSignal, messages }; // Return both the signal and updated messages
   } catch (error) {
-    console.error('Error fetching AI signal:', error.response?.data || error.message);
+    console.error(
+      'Error fetching AI signal:',
+      error.response?.data || error.message
+    );
     return null;
   }
 }
@@ -68,10 +82,10 @@ async function getAISignal(marketData) {
 async function executeTrade(signal, symbol, amount) {
   try {
     if (signal.toLowerCase().includes('buy')) {
-      await bot.telegram.sendMessage(chatId, `BUY Signal: ${signal}`);
+      await bot.telegram.sendMessage(chatId, `${signal}`);
       console.log('Buy Order Executed');
     } else if (signal.toLowerCase().includes('sell')) {
-      await bot.telegram.sendMessage(chatId, `SELL Signal: ${signal}`);
+      await bot.telegram.sendMessage(chatId, `${signal}`);
       console.log('Sell Order Executed');
     } else {
       console.log('No trade action taken.');
@@ -96,11 +110,17 @@ function startBot() {
       console.log(marketData.slice(-5));
 
       console.log('Fetching AI signal...');
-      const aiSignal = await getAISignal(marketData);
-      console.log('AI Signal:', aiSignal);
+      const result = await getAISignal(marketData, conversationHistory);
+      if (result) {
+        const { aiSignal, messages } = result;
+        console.log('AI Signal:', aiSignal);
 
-      if (aiSignal) {
-        await executeTrade(aiSignal, SYMBOL, AMOUNT);
+        // Update conversation history
+        conversationHistory = messages;
+
+        if (aiSignal) {
+          await executeTrade(aiSignal, SYMBOL, AMOUNT);
+        }
       }
     } catch (error) {
       console.error('Error in bot loop:', error);
