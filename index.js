@@ -74,6 +74,10 @@ async function getAISignal(marketData, previousMessages = []) {
       'Error fetching AI signal:',
       error.response?.data || error.message
     );
+    await bot.telegram.sendMessage(
+      chatId,
+      `${error.response?.data || error.message}`
+    );
     return null;
   }
 }
@@ -138,6 +142,7 @@ function stopBot() {
   }
 
   clearInterval(botInterval);
+  conversationHistory = []; // Reset conversation history
   botRunning = false;
   console.log('Trading bot stopped.');
 }
